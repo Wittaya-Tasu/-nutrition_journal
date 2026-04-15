@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style> body { -webkit-tap-highlight-color: transparent; } </style>
+</head>
+<body class="bg-slate-50 text-slate-900 pb-24 text-left">
+  <div class="max-w-md mx-auto p-5">
+    
+    <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 mb-6">
+      <div class="mb-4">
+        <h2 class="text-xs font-bold text-slate-400 uppercase tracking-widest">แคลอรี่ที่เหลือ</h2>
+        <div class="flex items-baseline gap-2">
+          <span id="remain-cal" class="text-6xl font-black text-slate-800">0</span>
+          <span class="text-lg font-bold text-slate-300">kcal</span>
+        </div>
+      </div>
+      <div class="flex justify-between pt-6 border-t border-slate-50">
+        <div><div id="target-cal" class="font-bold text-slate-800">0</div><div class="text-[10px] text-slate-400">เป้าหมาย</div></div>
+        <div><div id="food-cal" class="font-bold text-blue-600">0</div><div class="text-[10px] text-slate-400">กินแล้ว</div></div>
+      </div>
+    </div>
+
+    <div class="space-y-4 mb-8">
+      <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+        <div class="flex justify-between items-end mb-2">
+          <span class="text-xs font-black text-slate-400 uppercase">Protein (Goal <span id="pro-tar">0</span>g)</span>
+          <span class="text-sm font-bold text-orange-500"><span id="pro-cur">0</span>g</span>
+        </div>
+        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+          <div id="pro-bar" class="bg-orange-500 h-full transition-all" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+        <div class="flex justify-between items-center">
+          <div>
+            <h3 class="text-xs font-bold text-slate-400 uppercase">น้ำดื่ม (ลิตร)</h3>
+            <div class="text-2xl font-black text-blue-500"><span id="water-cur">0</span> / <span id="water-tar">0</span></div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="logWater(-0.25)" class="w-10 h-10 rounded-full bg-slate-100 text-slate-600 font-bold">-</button>
+            <button onclick="logWater(0.25)" class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-bold">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-8">
+      <canvas id="mainChart"></canvas>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <button onclick="startScan()" class="bg-slate-900 text-white p-6 rounded-[2rem] font-bold shadow-lg flex flex-col items-center">
+        <i class="fa-solid fa-barcode text-xl mb-1"></i> สแกน
+      </button>
+      <button onclick="logWeight()" class="bg-white text-slate-900 p-6 rounded-[2rem] font-bold shadow-sm border border-slate-200 flex flex-col items-center">
+        <i class="fa-solid fa-weight-scale text-xl mb-1"></i> น้ำหนัก
+      </button>
+    </div>
+
+  </div>
+
+  <div id="scannerModal" class="fixed inset-0 bg-black z-50 hidden">
+    <div id="reader"></div>
+    <button onclick="stopScan()" class="absolute bottom-10 left-1/2 -translate-x-1/2 bg-white px-8 py-3 rounded-full font-bold">ปิด</button>
+  </div>
+
+  <script>
+    let myChart;
+    window.onload = () => {
+      const cached = localStorage.getItem('proData');
+      if(cached) updateUI(JSON.parse(cached));
+      refresh();
+    };
+
+    function refresh() {
+      google.script.run.withSuccessHandler(data => {
+        localStorage.setItem('proData', JSON.stringify(data));
+        updateUI(data);
+      }).getDashboardData();
+    }
+
+    function updateUI(data) {
+      const remain = data.targets.cal - data.food.cal;
+      document.getElementById('remain-cal').innerText = remain.toLocaleString();
+      document.getElementById('target-cal').innerText = data.targets.cal;
+      document.getElementById('food-cal').innerText = data.food.cal;
+      document.getElementById('pro-cur').innerText = Math.round(data.food.pro);
+      document.getElementById('pro-tar').innerText = data.targets.pro;
+      document.getElementById('pro-bar').style.width = (data.food.pro/data.targets.pro*100)+'%';
+      document.getElementById('water-cur').innerText = data.water.current.toFixed(2);
+      document.getElementById('water-tar').innerText = data.water.target;
+      renderChart(data.chart);
+    }
+
+    function renderChart(c) {
+      const ctx = document.getElementById('mainChart');
+      if(myChart) myChart.destroy();
+      myChart = new Chart(ctx, { type: 'bar', data: { labels: c.labels, datasets: [{ label:'Calories', data: c.data, backgroundColor: '#3b82f6', borderRadius: 10 }] } });
+    }
+
+    function logWater(amt) { google.script.run.withSuccessHandler(refresh).saveLog('WaterLogs', [amt]); }
+    
+    function logWeight() {
+      const w = prompt("น้ำหนักวันนี้ (kg):");
+      if(w) google.script.run.withSuccessHandler(refresh).saveWeightAndUpdate(parseFloat(w));
+    }
+
+    function startScan() {
+      document.getElementById('scannerModal').classList.remove('hidden');
+      const scanner = new Html5Qrcode("reader");
+      scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => {
+        scanner.stop();
+        document.getElementById('scannerModal').classList.add('hidden');
+        google.script.run.withSuccessHandler(onFoodFound).searchBarcode(txt);
+      });
+    }
+    
+    function onFoodFound(f) {
+      if(f.found) {
+        if(confirm(`พบ: ${f.name}\nโปรตีน: ${f.pro}g | แคล: ${f.cal}kcal\nบันทึกเลย?`)) {
+          google.script.run.withSuccessHandler(refresh).saveLog('Logs', ['Scan', f.name, f.pro, f.carb, f.fat, f.cal]);
+        }
+      } else {
+        alert("ไม่พบข้อมูล กรุณากรอกใน Sheet ครับ");
+      }
+    }
+  </script>
+</body>
+</html>
